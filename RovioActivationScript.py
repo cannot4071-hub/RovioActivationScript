@@ -1,50 +1,74 @@
-import uuid, os, subprocess
-if os.name == "nt": os.system("title Rovio Activation Script")
-print("Rovio Activation Script v1.0.1 by PRO100KatYT\n")
-# Not using f-strings for compatibility with Python 3.2+
-
-def getMacAddressesInString():
-    macAddresses = []
+import os
+import sys
+import uuid
+import re
+def get_mac_addresses():
+    """
+    Retrieves system MAC addresses. 
+    Avoids invocation of getmac.exe which may fail or return invalid 
+    formatting under standard Wine prefix environments.
+    """
+    mac_addresses = []
     try:
-        output = subprocess.check_output("getmac /fo csv /nh", universal_newlines=True)
-        for line in output.splitlines():
-            if not line.strip(): continue
-            parts = line.split(",")
-            if len(parts) > 0:
-                macAddress = parts[0].replace("\"", "").upper()
-                if len(macAddress) == 17 and macAddress.count("-") == 5:
-                    if macAddress not in macAddresses:
-                        macAddresses.append(macAddress)
-    except: pass
-    if not macAddresses: # Use the old method of getting the address just in case something goes wrong
         mac_int = uuid.getnode()
-        macAddresses.append("-".join("{:012X}".format(mac_int)[i:i+2] for i in range(0, 12, 2)))
-    return ";".join(macAddresses)
-
+        if (mac_int >> 40) & 1 == 0:
+            formatted_mac = "-".join("{:012X}".format(mac_int)[i:i+2] for i in range(0, 12, 2))
+            mac_addresses.append(formatted_mac)
+    except Exception:
+        pass
+    if not mac_addresses:
+        try:
+            for interface in os.listdir('/sys/class/net/'):
+                if interface == 'lo':
+                    continue
+                with open(f'/sys/class/net/{interface}/address', 'r') as f:
+                    mac = f.read().strip().upper().replace(':', '-')
+                    if len(mac) == 17:
+                        mac_addresses.append(mac)
+        except Exception:
+            pass
+    if not mac_addresses:
+        mac_addresses.append("00-00-00-00-00-00")
+    return ";".join(list(set(mac_addresses)))
+def resolve_wine_locallow_path():
+    """
+    Resolves the exact LocalLow target path within the active Wine prefix hierarchy.
+    """
+    wine_prefix = os.environ.get('WINEPREFIX', os.path.expanduser('~/.wine'))
+    wine_user = os.environ.get('USER', 'bottle')
+    target_path = os.path.join(
+        wine_prefix, 
+        'drive_c', 
+        'users', 
+        wine_user, 
+        'AppData', 
+        'LocalLow', 
+        'Rovio', 
+        'Bad Piggies'
+    )
+    return target_path
 def main():
+    print("Rovio Compatibility Script v1.0.2 [POSIX/WINE Execution Node]\n")
     try:
-        xmlContent = '''<?xml version="1.0" encoding="utf-8"?>
-<data>
-<Boolean key="BDPGS12FL" value="True" />
-<String key="BDPGS12FL_hardwareID" value="{macAddress}" />
-</data>'''.format(macAddress=getMacAddressesInString())
-
-        appDataRoamingPath = os.environ['APPDATA']
-        appDataPath = os.path.dirname(appDataRoamingPath)
-        targetDir = os.path.join(appDataPath, 'LocalLow', 'Rovio', 'Bad Piggies')
-        os.makedirs(targetDir, exist_ok=True)
-        filePath = os.path.join(targetDir, 'Settings.xml')
-
-        with open(filePath, 'w', encoding='utf-8') as f: f.write(xmlContent)
-        
-        input("Settings.xml file has successfully been generated and saved in:\n{filePath}\n\nBad Piggies should now be activated!\n\nPress ENTER to close the program.".format(filePath=filePath))
-
-    except KeyError:
-        print("Can't find the AppData folder. Are you sure you are on Windows?")
+        hardware_id = get_mac_addresses()
+        target_dir = resolve_wine_locallow_path()
+        xml_content = (
+            '<?xml version="1.0" encoding="utf-8"?>\n'
+            '<data>\n'
+            '<Boolean key="BDPGS12FL" value="True" />\n'
+            '<String key="BDPGS12FL_hardwareID" value="{}" />\n'
+            '</data>\n'
+        ).format(hardware_id)
+        os.makedirs(target_dir, exist_ok=True)
+        file_path = os.path.join(target_dir, 'Settings.xml')
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write(xml_content)
+        print("Configuration successfully instantiated within the Wine environment.")
+        print("Path: {}".format(file_path))
+        print("Hardware ID Payload: {}".format(hardware_id))
     except Exception as e:
-        print("Unexpected error: {}".format(e))
+        print("Execution failure: {}".format(str(e)), file=sys.stderr)
+        sys.exit(1)
 
-try:
+if __name__ == "__main__":
     main()
-except ValueError as e:
-    input("Error: {}\nPress ENTER to close the program.".format(e))
